@@ -1,257 +1,172 @@
 // ==UserScript==
-// @id             IITC_MOD3_1EMPTY
-// @name           IITC - 3 Different MOD Owners + 1 Empty
+// @id             different-mod-owners-no-self
+// @name           Different MOD Owners + Empty (No Self)
 // @category       Highlighter
 // @version        1.2.0
-// @description    3人の異なるエージェントがMODを1個ずつ装備し、4枠目が空いているポータルをハイライト
-// @author         Custom
+// @description    Highlights portals with 1-3 MODs owned by different agents, excluding your own MODs
 // @match          https://intel.ingress.com/*
 // @grant          none
 // ==/UserScript==
 
 (function() {
-    'use strict';
+  'use strict';
 
-    function wrapper(plugin_info) {
+  var setup = function() {
+    var plugin = {};
 
-        if (typeof window.plugin !== 'function') {
-            window.plugin = function() {};
-        }
+    /*
+     * 対象判定
+     *
+     * MOD 3個 → 黄色
+     * MOD 2個 → 緑
+     * MOD 1個 → 青
+     *
+     * 共通条件:
+     * ・自分のMODがない
+     * ・MOD所有者が全員異なる
+     */
+    plugin.getType = function(portal) {
+      if (!portal || !portal.guid) return null;
 
-        window.plugin.mod3OneEmpty = {};
+      // IITCが既に取得している詳細情報のみ使用
+      var details = null;
 
-        var plugin = window.plugin.mod3OneEmpty;
+      if (window.IITC &&
+          IITC.portal &&
+          IITC.portal.details &&
+          typeof IITC.portal.details.get === 'function') {
 
-        /*
-         * ============================================================
-         * 判定
-         * ============================================================
-         *
-         * 条件：
-         *
-         *  1. 詳細情報が取得済み
-         *  2. MODスロットが4つ
-         *  3. MODが3個
-         *  4. 空きスロットが1個
-         *  5. 3個のMOD所有者が全員異なる
-         */
+        details = IITC.portal.details.get(portal.guid);
 
-        plugin.isTarget = function(portal) {
+      } else if (window.portalDetail &&
+                 typeof window.portalDetail.get === 'function') {
 
-            if (!portal || !portal.guid) {
-                return false;
-            }
+        details = window.portalDetail.get(portal.guid);
+      }
 
-            /*
-             * IITCが取得済みの詳細情報だけを参照。
-             *
-             * ここでは request() を呼ばないので、
-             * このプラグインから詳細情報を取得することはありません。
-             */
+      // 詳細情報がない場合は対象外
+      if (!details) return null;
 
-            var details = null;
+      var mods = details.mods;
 
-            if (window.IITC &&
-                IITC.portal &&
-                IITC.portal.details &&
-                typeof IITC.portal.details.get === 'function') {
+      // MODスロットが4つでなければ対象外
+      if (!Array.isArray(mods) || mods.length !== 4) {
+        return null;
+      }
 
-                details = IITC.portal.details.get(portal.guid);
+      // 入っているMODだけ取得
+      var installedMods = mods.filter(function(mod) {
+        return mod !== null && typeof mod === 'object';
+      });
 
-            } else if (window.portalDetail &&
-                       typeof window.portalDetail.get === 'function') {
+      var modCount = installedMods.length;
 
-                details = window.portalDetail.get(portal.guid);
-            }
+      // 1～3個だけ対象
+      if (modCount < 1 || modCount > 3) {
+        return null;
+      }
 
-            /*
-             * 詳細情報がまだ取得されていない
-             */
-            if (!details) {
-                return false;
-            }
+      // 自分のエージェント名
+      var myNickname = null;
 
-            /*
-             * MOD情報
-             */
-            var mods = details.mods;
+      if (window.PLAYER && PLAYER.nickname) {
+        myNickname = String(PLAYER.nickname);
+      }
 
-            if (!Array.isArray(mods)) {
-                return false;
-            }
+      // MOD所有者を取得
+      var owners = installedMods.map(function(mod) {
+        return mod.owner ? String(mod.owner) : null;
+      });
 
-            /*
-             * 今回確認していただいた実データは
-             *
-             * [
-             *   null,
-             *   { owner: "ahirnokomm", ... },
-             *   { owner: "YKondoh", ... },
-             *   { owner: "HiroshiSugawara", ... }
-             * ]
-             *
-             * という4要素配列。
-             */
+      // 所有者情報がない場合は対象外
+      if (owners.indexOf(null) !== -1) {
+        return null;
+      }
 
-            if (mods.length !== 4) {
-                return false;
-            }
+      // ★ 自分のMODが1つでもあれば対象外
+      if (myNickname && owners.indexOf(myNickname) !== -1) {
+        return null;
+      }
 
-            /*
-             * MODが入っているものだけ取得
-             */
-            var installedMods = mods.filter(function(mod) {
-                return mod !== null &&
-                       typeof mod === 'object';
-            });
+      // ★ MOD所有者が全員異なる必要がある
+      if (new Set(owners).size !== modCount) {
+        return null;
+      }
 
-            /*
-             * 3個ちょうど
-             */
-            if (installedMods.length !== 3) {
-                return false;
-            }
-
-            /*
-             * MOD所有者
-             */
-            var owners = installedMods.map(function(mod) {
-
-                if (!mod.owner) {
-                    return null;
-                }
-
-                return String(mod.owner);
-
-            });
-
-            /*
-             * 所有者情報が3個とも存在すること
-             */
-            if (owners.indexOf(null) !== -1) {
-                return false;
-            }
-
-            /*
-             * 3人全員が異なる
-             */
-            var uniqueOwners = new Set(owners);
-
-            if (uniqueOwners.size !== 3) {
-                return false;
-            }
-
-            return true;
-        };
-
-
-        /*
-         * ============================================================
-         * ハイライト関数
-         * ============================================================
-         *
-         * IITCのHighlighterには
-         *
-         *     data.portal.options
-         *
-         * としてポータルオブジェクトが渡されます。
-         */
-
-        plugin.highlight = function(data) {
-
-            if (!data || !data.portal) {
-                return;
-            }
-
-            var portal = data.portal.options;
-
-            if (!portal) {
-                return;
-            }
-
-            if (plugin.isTarget(portal)) {
-
-                /*
-                 * 対象ポータルを黄色でハイライト
-                 */
-                data.portal.setStyle({
-                    fillColor: '#FFD400',
-                    fillOpacity: 0.9,
-                    color: '#FF8800',
-                    opacity: 1,
-                    weight: 4
-                });
-            }
-        };
-
-
-        /*
-         * ============================================================
-         * IITCへ登録
-         * ============================================================
-         */
-
-        var setup = function() {
-
-            window.addPortalHighlighter(
-                '3 Different MOD Owners + 1 Empty',
-                plugin.highlight
-            );
-
-            console.log(
-                '[IITC MOD3_1EMPTY] loaded'
-            );
-        };
-
-
-        setup.info = plugin_info;
-
-        if (!window.bootPlugins) {
-            window.bootPlugins = [];
-        }
-
-        window.bootPlugins.push(setup);
-
-
-        /*
-         * IITCが既に起動している場合
-         */
-        if (window.iitcLoaded) {
-            setup();
-        }
-    }
+      return modCount;
+    };
 
 
     /*
-     * IITCのページコンテキストで実行
+     * ハイライト
      */
-    var script = document.createElement('script');
+    plugin.highlight = function(data) {
+      if (!data || !data.portal) return;
 
-    var info = {};
+      var portal = data.portal.options;
 
-    if (typeof GM_info !== 'undefined' &&
-        GM_info &&
-        GM_info.script) {
+      if (!portal) return;
 
-        info.script = {
-            version: GM_info.script.version,
-            name: GM_info.script.name,
-            description: GM_info.script.description
+      var modCount = plugin.getType(portal);
+
+      if (!modCount) return;
+
+      var style;
+
+      if (modCount === 3) {
+
+        // MOD 3個 / 空き1個
+        style = {
+          fillColor: '#FFD400',
+          fillOpacity: 0.9,
+          color: '#FF8800',
+          opacity: 1,
+          weight: 4
         };
+
+      } else if (modCount === 2) {
+
+        // MOD 2個 / 空き2個
+        style = {
+          fillColor: '#00CC66',
+          fillOpacity: 0.9,
+          color: '#008844',
+          opacity: 1,
+          weight: 4
+        };
+
+      } else if (modCount === 1) {
+
+        // MOD 1個 / 空き3個
+        style = {
+          fillColor: '#3399FF',
+          fillOpacity: 0.9,
+          color: '#0066CC',
+          opacity: 1,
+          weight: 4
+        };
+      }
+
+      data.portal.setStyle(style);
+    };
+
+
+    // IITCポータルハイライターに登録
+    if (typeof window.addPortalHighlighter === 'function') {
+      window.addPortalHighlighter(
+        'Different MOD Owners + Empty (No Self)',
+        plugin.highlight
+      );
     }
+  };
 
-    script.appendChild(
-        document.createTextNode(
-            '(' + wrapper + ')(' +
-            JSON.stringify(info) +
-            ');'
-        )
-    );
 
-    (
-        document.body ||
-        document.head ||
-        document.documentElement
-    ).appendChild(script);
+  // IITC起動後に実行
+  if (window.iitcLoaded) {
+    setup();
+  } else {
+    window.bootPlugins = window.bootPlugins || [];
+    window.bootPlugins.push(setup);
+  }
 
 })();
